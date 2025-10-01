@@ -91,7 +91,9 @@ class TelegramBot:
                 'state': 'idle',
                 'last_message_id': None,
                 'task_documents': {},
-                'control_messages': []
+                'keyboard_message_id': None,
+                'last_keyboard_text': None,
+                'last_keyboard_markup': None
             }
         return self.user_data[user_id]
     
@@ -166,41 +168,64 @@ class TelegramBot:
         logger.info(f"Код сохранен для пользователя {user_id}, задача {task['id']}")
         return html_filepath, metadata_filepath
     
-    async def cleanup_control_messages(self, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-        """Удаляет все предыдущие сообщения с кнопками управления"""
+    async def update_keyboard_message(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str = None, reply_markup=None):
+        """Обновляет или создает сообщение с постоянной клавиатурой"""
         user_data = self.get_user_data(user_id)
         
-        for message_id in user_data['control_messages']:
+        # Если текст не указан, используем стандартный
+        if text is None:
+            text = "💡 Выберите действие:"
+        
+        # Проверяем, изменились ли текст или клавиатура
+        current_text = user_data.get('last_keyboard_text')
+        current_markup = user_data.get('last_keyboard_markup')
+        
+        # Сравниваем текст и разметку
+        text_changed = current_text != text
+        markup_changed = str(current_markup) != str(reply_markup) if current_markup else True
+        
+        # Если у нас уже есть сообщение с клавиатурой и что-то изменилось, обновляем его
+        if user_data.get('keyboard_message_id') and (text_changed or markup_changed):
             try:
-                await context.bot.delete_message(chat_id=user_id, message_id=message_id)
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=user_data['keyboard_message_id'],
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+                # Сохраняем текущее состояние
+                user_data['last_keyboard_text'] = text
+                user_data['last_keyboard_markup'] = reply_markup
+                return
             except Exception as e:
-                logger.warning(f"Не удалось удалить сообщение с кнопками {message_id}: {e}")
+                # Игнорируем ошибку "Message is not modified"
+                if "Message is not modified" in str(e):
+                    logger.debug("Сообщение с клавиатурой не изменилось, пропускаем обновление")
+                    return
+                logger.warning(f"Не удалось обновить сообщение с клавиатурой: {e}")
+                # Если не удалось обновить, создаем новое
         
-        user_data['control_messages'] = []
-    
-    async def send_message_with_buttons(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, 
-                                      reply_markup=None, parse_mode=None, is_control=True):
-        """Отправляет новое сообщение с кнопками и очищает предыдущие кнопки"""
-        user_data = self.get_user_data(user_id)
-        
-        # Удаляем все предыдущие сообщения с кнопками управления
-        if is_control:
-            await self.cleanup_control_messages(context, user_id)
-        
-        # Отправляем новое сообщение с кнопками
+        # Если сообщения нет или не удалось обновить, создаем новое
         message = await context.bot.send_message(
             chat_id=user_id,
             text=text,
             reply_markup=reply_markup,
-            parse_mode=parse_mode
+            parse_mode='Markdown'
         )
         
-        # Сохраняем ID нового сообщения с кнопками, если это управляющее сообщение
-        if is_control:
-            user_data['control_messages'].append(message.message_id)
-            user_data['last_message_id'] = message.message_id
-            
-        return message
+        # Сохраняем ID сообщения с клавиатурой и текущее состояние
+        user_data['keyboard_message_id'] = message.message_id
+        user_data['last_keyboard_text'] = text
+        user_data['last_keyboard_markup'] = reply_markup
+    
+    async def send_temporary_message(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, parse_mode=None):
+        """Отправляет временное сообщение без клавиатуры"""
+        return await context.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            parse_mode=parse_mode
+        )
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -220,41 +245,118 @@ class TelegramBot:
         user_data = self.get_user_data(user_id)
         
         welcome_text = """
-    🚀 **Добро пожаловать в AI Code Generator Bot!**
+🚀 **Добро пожаловать в AI Code Generator Bot!**
 
-    Я помогу вам создавать крутые интерактивные проекты:
+Я помогу вам создавать крутые интерактивные проекты:
 
-    🎯 **Готовые примеры:**
-    • 🐱 Сайт-портфолио для IT-кота
-    • 🗺️ Интерактивная карта сокровищ  
-    • 🎮 Игра "Убеги от динозавра"
-    • 😂 Генератор мемов с анимацией
+🎯 **Готовые примеры:**
+• 🐱 Сайт-портфолио для IT-кота
+• 🗺️ Интерактивная карта сокровищ  
+• 🎮 Игра "Убеги от динозавра"
+• 😂 Генератор мемов с анимацией
 
-    **Как использовать:**
-    1. Выберите пример ниже или опишите свою идею
-    2. Получите готовый HTML/CSS/JS код
-    3. Скачайте файл и используйте!
+**Как использовать:**
+1. Выберите пример ниже или опишите свою идее
+2. Получите готовый HTML/CSS/JS код
+3. Скачайте файл и используйте!
 
-    **Просто напишите описание или выберите пример:**
+**Просто напишите описание или выберите пример:**
         """
         
-        # Клавиатура с примерами
+        # Отправляем приветственное сообщение
+        await self.send_temporary_message(
+            context, user_id, welcome_text, 
+            parse_mode='Markdown'
+        )
+        
+        # Обновляем клавиатуру с примерами
+        await self.update_examples_keyboard(context, user_id)
+        
+        logger.info(f"Пользователь {user_id} запустил бота")
+    
+    async def update_examples_keyboard(self, context: ContextTypes.DEFAULT_TYPE, user_id: int):
+        """Обновляет клавиатуру с примерами"""
         keyboard = [
             [InlineKeyboardButton("🐱 Портфолио кота", callback_data="example_cat")],
             [InlineKeyboardButton("🗺️ Карта сокровищ", callback_data="example_treasure")],
             [InlineKeyboardButton("🎮 Убеги от динозавра", callback_data="example_dinosaur")],
             [InlineKeyboardButton("😂 Генератор мемов", callback_data="example_memes")],
-            [InlineKeyboardButton("📝 Свой вариант", callback_data="text_input")]
+            [InlineKeyboardButton("📝 Свой вариант", callback_data="text_input")],
+            [InlineKeyboardButton("📖 Справка", callback_data="help")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await self.send_message_with_buttons(
-            context, user_id, welcome_text, 
-            reply_markup=reply_markup, 
-            parse_mode='Markdown'
-        )      
-        logger.info(f"Пользователь {user_id} запустил бота")
+        await self.update_keyboard_message(
+            context, user_id,
+            "🎯 Выберите пример или действие:",
+            reply_markup=reply_markup
+        )
+    
+    async def update_main_keyboard(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, task: Dict = None):
+        """Обновляет основную клавиатуру управления"""
+        user_data = self.get_user_data(user_id)
+        
+        keyboard = []
+        
+        # Если есть текущая задача, добавляем кнопки для работы с ней
+        if task and task['id'] in user_data['generated_codes']:
+            keyboard.append([InlineKeyboardButton("🔄 Перегенерировать код", callback_data="regenerate")])
+        
+        # Кнопки для навигации по задачам
+        switch_buttons = []
+        
+        # Добавляем кнопки для переключения между задачами
+        for i, excel_task in enumerate(user_data['excel_tasks']):
+            if excel_task['id'] in user_data['generated_codes']:
+                switch_buttons.append(
+                    InlineKeyboardButton(
+                        f"📊 {excel_task['summary'][:15]}...", 
+                        callback_data=f"switch_task_excel_{i}"
+                    )
+                )
+        
+        for i, text_task in enumerate(user_data['text_tasks']):
+            if text_task['id'] in user_data['generated_codes']:
+                switch_buttons.append(
+                    InlineKeyboardButton(
+                        f"📝 {text_task['summary'][:15]}...", 
+                        callback_data=f"switch_task_text_{i}"
+                    )
+                )
+        
+        # Добавляем кнопки переключения (максимум 2 в ряд)
+        if switch_buttons:
+            keyboard.append([InlineKeyboardButton("🔀 Переключиться на задачу:", callback_data="no_action")])
+            for i in range(0, len(switch_buttons), 2):
+                row = switch_buttons[i:i+2]
+                keyboard.append(row)
+        
+        # Основные кнопки управления
+        keyboard.extend([
+            [InlineKeyboardButton("📋 Показать все задачи", callback_data="task_list")],
+            [
+                InlineKeyboardButton("📝 Новая задача", callback_data="new_task"),
+                InlineKeyboardButton("📖 Справка", callback_data="help")
+            ],
+            [InlineKeyboardButton("🗑️ Очистить историю", callback_data="clear")]
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Текст для клавиатуры
+        if task:
+            text = f"📋 **Текущая задача:** {task['summary']}\n\n💡 Выберите действие:"
+        else:
+            total_tasks = len(user_data['excel_tasks']) + len(user_data['text_tasks'])
+            generated_tasks = len(user_data['generated_codes'])
+            text = f"📊 **Статистика:** {generated_tasks}/{total_tasks} задач сгенерировано\n\n💡 Выберите действие:"
+        
+        await self.update_keyboard_message(
+            context, user_id,
+            text,
+            reply_markup=reply_markup
+        )
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /help"""
@@ -285,11 +387,14 @@ class TelegramBot:
 Для начала работы отправьте текст задачи или Excel файл!
         """
         
-        await self.send_message_with_buttons(
+        await self.send_temporary_message(
             context, user_id, help_text, 
-            reply_markup=self.get_main_keyboard(), 
             parse_mode='Markdown'
         )
+        
+        # Обновляем клавиатуру
+        user_data = self.get_user_data(user_id)
+        await self.update_main_keyboard(context, user_id, user_data.get('current_task'))
     
     async def clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /clear"""
@@ -307,14 +412,19 @@ class TelegramBot:
             'state': 'idle',
             'last_message_id': None,
             'task_documents': {},
-            'control_messages': []
+            'keyboard_message_id': None,
+            'last_keyboard_text': None,
+            'last_keyboard_markup': None
         }
         
-        await self.send_message_with_buttons(
+        await self.send_temporary_message(
             context, user_id, 
-            "✅ История задач очищена!", 
-            reply_markup=self.get_main_keyboard()
+            "✅ История задач очищена!"
         )
+        
+        # Возвращаем клавиатуру с примерами
+        await self.update_examples_keyboard(context, user_id)
+        
         logger.info(f"Пользователь {user_id} очистил историю")
     
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,10 +439,9 @@ class TelegramBot:
         file_extension = document.file_name.split('.')[-1].lower()
         
         if file_extension != 'xlsx':
-            await self.send_message_with_buttons(
+            await self.send_temporary_message(
                 context, user_id, 
-                "❌ Пожалуйста, загрузите файл в формате .xlsx", 
-                reply_markup=self.get_main_keyboard()
+                "❌ Пожалуйста, загрузите файл в формате .xlsx"
             )
             return
         
@@ -350,7 +459,12 @@ class TelegramBot:
                 user_data['excel_tasks'] = tasks
                 user_data['state'] = 'excel_loaded'
                 
-                # Создаем клавиатуру для выбора задач
+                await self.send_temporary_message(
+                    context, user_id,
+                    f"✅ Найдено задач: {len(tasks)}\n\nВыберите задачу для генерации кода:"
+                )
+                
+                # Обновляем клавиатуру для выбора задач
                 keyboard = []
                 for i, task in enumerate(tasks):
                     keyboard.append([
@@ -361,30 +475,28 @@ class TelegramBot:
                     ])
                 
                 keyboard.append([InlineKeyboardButton("📝 Текстовый ввод", callback_data="text_input")])
-                keyboard.extend(self.get_main_keyboard().inline_keyboard)
+                keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
                 
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                await self.send_message_with_buttons(
+                await self.update_keyboard_message(
                     context, user_id,
-                    f"✅ Найдено задач: {len(tasks)}\n\nВыберите задачу для генерации кода:",
+                    "📋 Выберите задачу из Excel:",
                     reply_markup=reply_markup
                 )
                 
                 logger.info(f"Пользователь {user_id} загрузил Excel с {len(tasks)} задачами")
             else:
-                await self.send_message_with_buttons(
+                await self.send_temporary_message(
                     context, user_id,
-                    "❌ Не найдено подходящих задач в файле", 
-                    reply_markup=self.get_main_keyboard()
+                    "❌ Не найдено подходящих задач в файле"
                 )
                 
         except Exception as e:
             logger.error(f"Error processing Excel file: {e}")
-            await self.send_message_with_buttons(
+            await self.send_temporary_message(
                 context, user_id,
-                f"❌ Ошибка обработки файла: {str(e)}", 
-                reply_markup=self.get_main_keyboard()
+                f"❌ Ошибка обработки файла: {str(e)}"
             )
         finally:
             # Удаляем временный файл
@@ -423,7 +535,6 @@ class TelegramBot:
         logger.info(f"Пользователь {user_id} отправил текстовый запрос: {text[:50]}...")
     
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
         """Обработка callback от inline кнопок"""
         query = update.callback_query
         await query.answer()
@@ -448,21 +559,20 @@ class TelegramBot:
             elif callback_data == 'text_input':
                 # Переход к текстовому вводу
                 user_data['state'] = 'idle'
-                await self.send_message_with_buttons(
+                await self.send_temporary_message(
                     context, user_id,
-                    "📝 Введите описание задачи:", 
-                    reply_markup=self.get_main_keyboard()
+                    "📝 Введите описание задачи:"
                 )
+                await self.update_main_keyboard(context, user_id)
             
             elif callback_data == 'regenerate':
                 # Перегенерация кода
                 if user_data['current_task']:
                     await self.generate_and_send_code(update, context, user_data['current_task'], regenerate=True)
                 else:
-                    await self.send_message_with_buttons(
+                    await self.send_temporary_message(
                         context, user_id,
-                        "❌ Нет текущей задачи для перегенерации", 
-                        reply_markup=self.get_main_keyboard()
+                        "❌ Нет текущей задачи для перегенерации"
                     )
             
             elif callback_data.startswith('switch_task_'):
@@ -477,10 +587,9 @@ class TelegramBot:
                     elif task_type == 'text' and task_index < len(user_data['text_tasks']):
                         task = user_data['text_tasks'][task_index]
                     else:
-                        await self.send_message_with_buttons(
+                        await self.send_temporary_message(
                             context, user_id,
-                            "❌ Задача не найдена", 
-                            reply_markup=self.get_main_keyboard()
+                            "❌ Задача не найдена"
                         )
                         return
                     
@@ -501,22 +610,26 @@ class TelegramBot:
             elif callback_data == 'new_task':
                 # Новая задача
                 user_data['state'] = 'idle'
-                await self.send_message_with_buttons(
+                await self.send_temporary_message(
                     context, user_id,
-                    "📝 Введите описание новой задачи:", 
-                    reply_markup=self.get_main_keyboard()
+                    "📝 Введите описание новой задачи:"
                 )
+            
+            elif callback_data == 'back_to_main':
+                # Возврат к главной клавиатуре
+                await self.update_main_keyboard(context, user_id)
             
             elif callback_data == 'no_action':
                 # Пустое действие
                 pass
+            
             elif callback_data.startswith('example_'):
                 example_type = callback_data.split('_')[1]
                 examples = {
                     'cat': "Создай креативное сайт-портфолио для кота, который ищет работу фронтенд-разработчиком. Включи анимации, интерактивные элементы и чувство юмора.",
                     'treasure': "Создай интерактивную карту сокровищ с анимацией клада, анимированным компасом и эффектами при наведении на острова.",
                     'dinosaur': "Создай простую игру 'Убеги от динозавра' с анимированным персонажем, препятствиями и счетчиком очков.",
-                    'memes': "Создай генератор мемов с движущимися элементами, возможностью добавления текста и анимированными кнопками. "
+                    'memes': "Создай генератор мемов с движущимися элементами, возможностью добавления текста и анимированными кнопками."
                 }
                 
                 if example_type in examples:
@@ -533,34 +646,30 @@ class TelegramBot:
                     
             else:
                 logger.warning(f"Неизвестный callback: {callback_data}")
-                await self.send_message_with_buttons(
+                await self.send_temporary_message(
                     context, user_id,
-                    "❌ Неизвестная команда", 
-                    reply_markup=self.get_main_keyboard()
+                    "❌ Неизвестная команда"
                 )
                 
         except Exception as e:
             logger.error(f"Ошибка обработки callback: {e}")
-            await self.send_message_with_buttons(
+            await self.send_temporary_message(
                 context, user_id,
-                "❌ Ошибка обработки запроса", 
-                reply_markup=self.get_main_keyboard()
+                "❌ Ошибка обработки запроса"
             )
     
     async def show_task_list(self, user_id: int, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает список всех задач с возможностью переключения"""
+        """Показывает список всех задач"""
         user_data = self.get_user_data(user_id)
         
         if not user_data['excel_tasks'] and not user_data['text_tasks']:
-            await self.send_message_with_buttons(
+            await self.send_temporary_message(
                 context, user_id,
-                "📭 У вас пока нет задач. Отправьте текстовое описание или Excel файл.",
-                reply_markup=self.get_main_keyboard()
+                "📭 У вас пока нет задач. Отправьте текстовое описание или Excel файл."
             )
             return
         
         text = "📋 **Список ваших задач:**\n\n"
-        keyboard = []
         
         # Задачи из Excel
         if user_data['excel_tasks']:
@@ -568,14 +677,6 @@ class TelegramBot:
             for i, task in enumerate(user_data['excel_tasks']):
                 status = "✅" if task['id'] in user_data['generated_codes'] else "⏳"
                 text += f"{status} {task['id']}. {task['summary']}\n"
-                
-                if task['id'] in user_data['generated_codes']:
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"📊 {task['summary'][:20]}...", 
-                            callback_data=f"switch_task_excel_{i}"
-                        )
-                    ])
         
         # Текстовые задачи
         if user_data['text_tasks']:
@@ -583,24 +684,15 @@ class TelegramBot:
             for i, task in enumerate(user_data['text_tasks']):
                 status = "✅" if task['id'] in user_data['generated_codes'] else "⏳"
                 text += f"{status} {task['summary']}\n"
-                
-                if task['id'] in user_data['generated_codes']:
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"📝 {task['summary'][:20]}...", 
-                            callback_data=f"switch_task_text_{i}"
-                        )
-                    ])
         
-        # Добавляем основные кнопки
-        keyboard.extend(self.get_main_keyboard().inline_keyboard)
-        
-        await self.send_message_with_buttons(
+        await self.send_temporary_message(
             context, user_id,
             text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
+        
+        # Обновляем основную клавиатуру
+        await self.update_main_keyboard(context, user_id, user_data.get('current_task'))
     
     async def send_help_message(self, user_id: int, context: ContextTypes.DEFAULT_TYPE):
         """Отправка сообщения со справкой"""
@@ -624,12 +716,15 @@ class TelegramBot:
 - 📖 Справка - показать эту справку
 - 🗑️ Очистить - удалить историю задач
         """
-        await self.send_message_with_buttons(
+        await self.send_temporary_message(
             context, user_id,
             help_text,
-            parse_mode='Markdown',
-            reply_markup=self.get_main_keyboard()
+            parse_mode='Markdown'
         )
+        
+        # Обновляем основную клавиатуру
+        user_data = self.get_user_data(user_id)
+        await self.update_main_keyboard(context, user_id, user_data.get('current_task'))
     
     async def clear_user_data(self, user_id: int, context: ContextTypes.DEFAULT_TYPE):
         """Очистка данных пользователя"""
@@ -642,13 +737,18 @@ class TelegramBot:
             'state': 'idle',
             'last_message_id': None,
             'task_documents': {},
-            'control_messages': []
+            'keyboard_message_id': None,
+            'last_keyboard_text': None,
+            'last_keyboard_markup': None
         }
-        await self.send_message_with_buttons(
+        await self.send_temporary_message(
             context, user_id,
-            "✅ История задач очищена!",
-            reply_markup=self.get_main_keyboard()
+            "✅ История задач очищена!"
         )
+        
+        # Возвращаем клавиатуру с примерами
+        await self.update_examples_keyboard(context, user_id)
+        
         logger.info(f"Пользователь {user_id} очистил историю")
     
     async def generate_and_send_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task: Dict, regenerate: bool = False):
@@ -711,8 +811,8 @@ class TelegramBot:
                 # Удаляем сообщение о генерации
                 await context.bot.delete_message(chat_id=user_id, message_id=message.message_id)
                 
-                # Отправляем сообщение с клавиатурой управления
-                await self.send_control_keyboard(user_id, context, task)
+                # Обновляем клавиатуру управления
+                await self.update_main_keyboard(context, user_id, task)
                 
                 logger.info(f"Код сгенерирован для задачи {task['id']} пользователя {user_id}")
             else:
@@ -743,10 +843,9 @@ class TelegramBot:
         self.log_activity(user_id, "switch_task", task['id'], task.get('description', ''))
         
         if task['id'] not in user_data['generated_codes']:
-            await self.send_message_with_buttons(
+            await self.send_temporary_message(
                 context, user_id,
-                "❌ Код для этой задачи еще не сгенерирован", 
-                reply_markup=self.get_main_keyboard()
+                "❌ Код для этой задачи еще не сгенерирован"
             )
             return
         
@@ -757,95 +856,18 @@ class TelegramBot:
         
         if doc_id:
             # Отправляем сообщение с информацией о переключении
-            await context.bot.send_message(
-                chat_id=user_id,
+            await self.send_temporary_message(
+                context, user_id,
                 text=f"✅ Переключились на: {task['summary']}"
             )
             
-            # Отправляем сообщение с клавиатурой управления
-            await self.send_control_keyboard(user_id, context, task)
+            # Обновляем клавиатуру управления
+            await self.update_main_keyboard(context, user_id, task)
         else:
             # Если документ не найден, перегенерируем код
             await self.generate_and_send_code(update, context, task, regenerate=True)
         
         logger.info(f"Пользователь {user_id} переключился на задачу {task['id']}")
-    
-    def get_main_keyboard(self) -> InlineKeyboardMarkup:
-        """Возвращает основную клавиатуру с основными кнопками"""
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Перегенерировать", callback_data="regenerate"),
-                InlineKeyboardButton("📋 Список задач", callback_data="task_list")
-            ],
-            [
-                InlineKeyboardButton("📝 Новая задача", callback_data="new_task"),
-                InlineKeyboardButton("📖 Справка", callback_data="help")
-            ],
-            [
-                InlineKeyboardButton("🗑️ Очистить", callback_data="clear")
-            ]
-        ]
-        return InlineKeyboardMarkup(keyboard)
-    
-    async def send_control_keyboard(self, user_id: int, context: ContextTypes.DEFAULT_TYPE, task: Dict):
-        """Отправка клавиатуры управления"""
-        user_data = self.get_user_data(user_id)
-        
-        keyboard = []
-        
-        # Кнопка перегенерации
-        keyboard.append([InlineKeyboardButton("🔄 Перегенерировать", callback_data="regenerate")])
-        
-        # Кнопки переключения между задачами
-        switch_buttons = []
-        
-        # Задачи из Excel
-        for i, excel_task in enumerate(user_data['excel_tasks']):
-            if excel_task['id'] != task['id'] and excel_task['id'] in user_data['generated_codes']:
-                switch_buttons.append(
-                    InlineKeyboardButton(
-                        f"📊 {excel_task['summary'][:15]}...", 
-                        callback_data=f"switch_task_excel_{i}"
-                    )
-                )
-        
-        # Текстовые задачи
-        for i, text_task in enumerate(user_data['text_tasks']):
-            if text_task['id'] != task['id'] and text_task['id'] in user_data['generated_codes']:
-                switch_buttons.append(
-                    InlineKeyboardButton(
-                        f"📝 {text_task['summary'][:15]}...", 
-                        callback_data=f"switch_task_text_{i}"
-                    )
-                )
-        
-        # Добавляем кнопки переключения (максимум 2 в ряд)
-        if switch_buttons:
-            keyboard.append([InlineKeyboardButton("🔀 Переключиться на:", callback_data="no_action")])
-            for i in range(0, len(switch_buttons), 2):
-                row = switch_buttons[i:i+2]
-                keyboard.append(row)
-        
-        # Добавляем кнопку списка задач и основные кнопки
-        keyboard.append([InlineKeyboardButton("📋 Показать все задачи", callback_data="task_list")])
-        keyboard.extend(self.get_main_keyboard().inline_keyboard)
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        stats_text = f"""
-📊 **Статистика:**
-• Всего задач: {len(user_data['excel_tasks']) + len(user_data['text_tasks'])}
-• Сгенерировано: {len(user_data['generated_codes'])}
-
-💡 Используйте кнопки для управления задачами!
-        """
-        
-        await self.send_message_with_buttons(
-            context, user_id,
-            stats_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
 
 def run_bot(token: str):
     """Запуск Telegram бота"""
