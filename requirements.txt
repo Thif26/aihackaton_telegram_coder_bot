@@ -1,11 +1,8 @@
-openpyxl>=3.1.0
-replicate>=0.21.0
-python-dotenv>=1.0.0
-python-telegram-bot==20.7
 openpyxl==3.1.2
-requests==2.31.0
+replicate>=0.21.0
 python-dotenv==1.0.0
-numpy>=1.25.0
-pandas==1.5.3
+python-telegram-bot==20.7
+requests==2.31.0
+numpy>=1.25.0 
+pandas>=2.0.0,<3.0.0 
 streamlit==1.28.0
-
