@@ -33,18 +33,6 @@ div[data-testid="stSidebarUserContent"] {
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# Функция для загрузки изображений
-def load_image(image_path):
-    """Загрузка изображения и преобразование в base64"""
-    import base64
-    try:
-        with open(image_path, "rb") as img_file:
-            encoded_string = base64.b64encode(img_file.read()).decode()
-        return f"data:image/jpeg;base64,{encoded_string}"
-    except Exception as e:
-        st.error(f"Ошибка загрузки изображения {image_path}: {e}")
-        return None
-
 # Создание директорий для сохранения файлов
 def setup_directories():
     """Создание необходимых директорий для сохранения файлов"""
@@ -250,22 +238,20 @@ def load_code_renderer():
     return CodeRenderer()
 
 def main():
-    # Пути к изображениям
+    # URL изображений с GitHub
     header_image_path = "https://raw.githubusercontent.com/Thif26/aihackaton_telegram_coder_bot/main/images/Header.png"
     logo_image_path = "https://raw.githubusercontent.com/Thif26/aihackaton_telegram_coder_bot/main/images/logo.jpg"
     
     # Верхняя картинка на всю ширину экрана
-    header_image = load_image(header_image_path)
-    if header_image:
-        st.markdown(
-            f"""
-            <div style="width: 100%; margin: 0 auto; text-align: center;">
-                <img src="{header_image}" 
-                     style="width: 100%; max-width: 400px; height: auto; border-radius: 10px; margin-bottom: 1rem;">
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        f"""
+        <div style="width: 100%; margin: 0 auto; text-align: center;">
+            <img src="{header_image_path}" 
+                 style="width: 100%; max-width: 800px; height: auto; border-radius: 10px; margin-bottom: 1rem;">
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
     
     st.title("🚀 AI Code Generator")
     
@@ -293,17 +279,17 @@ def main():
         st.session_state.saved_files = {}
     
     # Загружаем состояние пользователя при первом запуске
-    if 'state_loaded' not in st.session_state:
-        if load_user_state():
-            st.success("✅ Загружена история из предыдущих сессий!")
+#    if 'state_loaded' not in st.session_state:
+#        if load_user_state():
+#            st.success("✅ Загружена история из предыдущих сессий!")
         
         # Загружаем задачи из файлов для переключения
-        file_tasks = load_tasks_from_files()
-        if file_tasks:
-            st.session_state.file_tasks = file_tasks
-            st.success(f"✅ Загружено {len(file_tasks)} задач из файлов для переключения!")
-        
-        st.session_state.state_loaded = True
+#        file_tasks = load_tasks_from_files()
+#        if file_tasks:
+#            st.session_state.file_tasks = file_tasks
+#            st.success(f"✅ Загружено {len(file_tasks)} задач из файлов для переключения!")
+#        
+#        st.session_state.state_loaded = True
     
     # Мобильная навигация
     if st.session_state.current_task and st.session_state.current_task['id'] in st.session_state.generated_codes:
@@ -322,17 +308,15 @@ def main():
             show_settings(session_id, user_id)
     
     # Нижняя картинка по центру среднего размера
-    logo_image = load_image(logo_image_path)
-    if logo_image:
-        st.markdown(
-            f"""
-            <div style="width: 100%; margin: 2rem auto; text-align: center;">
-                <img src="{logo_image}" 
-                     style="width: 100%; max-width: 200px; height: auto; border-radius: 10px;">
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        f"""
+        <div style="width: 100%; margin: 2rem auto; text-align: center;">
+            <img src="{logo_image_path}" 
+                 style="width: 200%; max-width: 700px; height: auto; border-radius: 10px;">
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
 
 #def display_task_history(session_id):
 #    """Отображение истории задач внизу страницы"""
