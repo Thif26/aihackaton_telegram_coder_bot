@@ -247,7 +247,7 @@ def main():
         f"""
         <div style="width: 100%; margin: 0 auto; text-align: center;">
             <img src="{header_image_path}" 
-                 style="width: 100%; max-width: 800px; height: auto; border-radius: 10px; margin-bottom: 1rem;">
+                 style="width: 100%; max-width: 100%; height: auto; border-radius: 10px; margin-bottom: 1rem;">
         </div>
         """, 
         unsafe_allow_html=True
@@ -307,12 +307,12 @@ def main():
         if st.session_state.get('show_settings', False):
             show_settings(session_id, user_id)
     
-    # Нижняя картинка по центру среднего размера
+# Нижняя картинка по центру среднего размера
     st.markdown(
         f"""
         <div style="width: 100%; margin: 2rem auto; text-align: center;">
             <img src="{logo_image_path}" 
-                 style="width: 200%; max-width: 700px; height: auto; border-radius: 10px;">
+                 style="width: 100%; max-width: 300px; height: auto; border-radius: 10px;">
         </div>
         """, 
         unsafe_allow_html=True
