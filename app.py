@@ -279,17 +279,17 @@ def main():
         st.session_state.saved_files = {}
     
     # Загружаем состояние пользователя при первом запуске
-#    if 'state_loaded' not in st.session_state:
-#        if load_user_state():
-#            st.success("✅ Загружена история из предыдущих сессий!")
+    if 'state_loaded' not in st.session_state:
+        if load_user_state():
+            st.success("✅ Загружена история из предыдущих сессий!")
+       
+       # Загружаем задачи из файлов для переключения
+        file_tasks = load_tasks_from_files()
+        if file_tasks:
+            st.session_state.file_tasks = file_tasks
+            st.success(f"✅ Загружено {len(file_tasks)} задач из файлов для переключения!")
         
-        # Загружаем задачи из файлов для переключения
-#        file_tasks = load_tasks_from_files()
-#        if file_tasks:
-#            st.session_state.file_tasks = file_tasks
-#            st.success(f"✅ Загружено {len(file_tasks)} задач из файлов для переключения!")
-#        
-#        st.session_state.state_loaded = True
+        st.session_state.state_loaded = True
     
     # Мобильная навигация
     if st.session_state.current_task and st.session_state.current_task['id'] in st.session_state.generated_codes:
