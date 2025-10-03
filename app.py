@@ -692,7 +692,7 @@ def display_results(session_id, user_id):
     
     # Вертикальное расположение вместо колонок
     st.markdown("### 👁️ Предпросмотр")
-    st.components.v1.html(html_content, height=400, scrolling=True)
+    st.components.v1.html(html_content, height=1000, scrolling=True)
     
     st.markdown("### 📝 Код")
     with st.expander("Показать код"):
@@ -701,6 +701,8 @@ def display_results(session_id, user_id):
             st.code(generated_code, language='html')
         else:
             st.error("Код недоступен для отображения")
+
+
 def show_statistics(session_id, user_id):
     """Показать статистику по сессии"""
     st.markdown("---")
