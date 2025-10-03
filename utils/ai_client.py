@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class AIClient:
     def __init__(self):
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = "mistralai/mistral-small-3.2-24b-instruct:free"
+        self.model = "x-ai/grok-4-fast:free"
         self.api_key = self._get_api_key()
     
     def _get_api_key(self):
