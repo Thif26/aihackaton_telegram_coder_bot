@@ -1,3 +1,4 @@
+
 import os
 import logging
 import tempfile
@@ -93,9 +94,36 @@ class TelegramBot:
                 'task_documents': {},
                 'keyboard_message_id': None,
                 'last_keyboard_text': None,
-                'last_keyboard_markup': None
+                'last_keyboard_markup': None,
+                'previous_messages': []  # Храним ID предыдущих сообщений для удаления
             }
         return self.user_data[user_id]
+    
+    async def cleanup_previous_messages(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, keep_keyboard: bool = False):
+        """Удаление предыдущих сообщений бота"""
+        user_data = self.get_user_data(user_id)
+        
+        messages_to_delete = []
+        
+        # Добавляем все предыдущие сообщения кроме клавиатуры (если нужно сохранить)
+        for msg_id in user_data.get('previous_messages', []):
+            if keep_keyboard and msg_id == user_data.get('keyboard_message_id'):
+                continue
+            messages_to_delete.append(msg_id)
+        
+        # Удаляем сообщения
+        for msg_id in messages_to_delete:
+            try:
+                await context.bot.delete_message(chat_id=user_id, message_id=msg_id)
+            except Exception as e:
+                logger.debug(f"Не удалось удалить сообщение {msg_id}: {e}")
+        
+        # Обновляем список предыдущих сообщений
+        if keep_keyboard and user_data.get('keyboard_message_id'):
+            user_data['previous_messages'] = [user_data['keyboard_message_id']]
+        else:
+            user_data['previous_messages'] = []
+            user_data['keyboard_message_id'] = None
     
     def save_user_info(self, user_id: int, username: str, first_name: str, last_name: str = ""):
         """Сохранение информации о пользователе"""
@@ -218,18 +246,30 @@ class TelegramBot:
         user_data['keyboard_message_id'] = message.message_id
         user_data['last_keyboard_text'] = text
         user_data['last_keyboard_markup'] = reply_markup
+        
+        # Добавляем в список для возможного удаления
+        user_data['previous_messages'].append(message.message_id)
     
     async def send_temporary_message(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, parse_mode=None):
         """Отправляет временное сообщение без клавиатуры"""
-        return await context.bot.send_message(
+        message = await context.bot.send_message(
             chat_id=user_id,
             text=text,
             parse_mode=parse_mode
         )
+        
+        # Сохраняем ID для возможного удаления
+        user_data = self.get_user_data(user_id)
+        user_data['previous_messages'].append(message.message_id)
+        
+        return message
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         user = update.effective_user
+        
+        # Очищаем предыдущие сообщения
+        await self.cleanup_previous_messages(context, user_id)
         
         # Сохраняем информацию о пользователе
         self.save_user_info(
@@ -252,8 +292,8 @@ class TelegramBot:
 🎯 **Готовые примеры:**
 • 🐱 Сайт-портфолио для IT-кота
 • 🗺️ Интерактивная карта сокровищ  
-• 🎮 Игра "Убеги от динозавра"
-• 😂 Генератор мемов с анимацией
+• 🎮 Игра: Убеги от тимлида"
+• 😂 Генератор мемов на дейлик
 
 **Как использовать:**
 1. Выберите пример ниже или опишите свою идее
@@ -362,6 +402,9 @@ class TelegramBot:
         """Обработчик команды /help"""
         user_id = update.effective_user.id
         
+        # Очищаем предыдущие сообщения, но сохраняем клавиатуру
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
+        
         # Логируем действие
         self.log_activity(user_id, "help_command")
         
@@ -373,7 +416,7 @@ class TelegramBot:
 - "Хочу" - основное описание
 - "Чтобы" - цель/результат  
 - "Критерии приемки" - требования
-- "Комментарии" - дополнительные notes
+- "Комментарии" - дополнительные замечания
 
 **Текстовые запросы:**
 Просто опишите что нужно создать. Пример:
@@ -400,6 +443,9 @@ class TelegramBot:
         """Обработчик команды /clear"""
         user_id = update.effective_user.id
         
+        # Очищаем предыдущие сообщения
+        await self.cleanup_previous_messages(context, user_id)
+        
         # Логируем действие
         self.log_activity(user_id, "clear_history")
         
@@ -414,7 +460,8 @@ class TelegramBot:
             'task_documents': {},
             'keyboard_message_id': None,
             'last_keyboard_text': None,
-            'last_keyboard_markup': None
+            'last_keyboard_markup': None,
+            'previous_messages': []
         }
         
         await self.send_temporary_message(
@@ -431,6 +478,9 @@ class TelegramBot:
         """Обработка загрузки Excel файлов"""
         user_id = update.effective_user.id
         user_data = self.get_user_data(user_id)
+        
+        # Очищаем предыдущие сообщения, но сохраняем клавиатуру
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
         
         # Логируем действие
         self.log_activity(user_id, "upload_excel")
@@ -504,10 +554,13 @@ class TelegramBot:
                 os.remove(file_path)
     
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка текстовых сообщений"""
+        """Обработка текстовых сообщений - НЕ УДАЛЯЕМ КЛАВИАТУРУ"""
         user_id = update.effective_user.id
         user_data = self.get_user_data(user_id)
         text = update.message.text
+        
+        # Очищаем предыдущие сообщения, но СОХРАНЯЕМ КЛАВИАТУРУ
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
         
         # Логируем действие
         self.log_activity(user_id, "text_input", task_description=text[:50])
@@ -543,6 +596,9 @@ class TelegramBot:
         user_data = self.get_user_data(user_id)
         callback_data = query.data
         
+        # Очищаем предыдущие сообщения, но сохраняем клавиатуру
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
+        
         # Логируем действие
         self.log_activity(user_id, f"callback_{callback_data}")
         
@@ -557,12 +613,13 @@ class TelegramBot:
                     await self.generate_and_send_code(update, context, task)
             
             elif callback_data == 'text_input':
-                # Переход к текстовому вводу
+                # Переход к текстовому вводу - НЕ УДАЛЯЕМ КЛАВИАТУРУ
                 user_data['state'] = 'idle'
                 await self.send_temporary_message(
                     context, user_id,
                     "📝 Введите описание задачи:"
                 )
+                # Обновляем клавиатуру для текстового ввода
                 await self.update_main_keyboard(context, user_id)
             
             elif callback_data == 'regenerate':
@@ -608,12 +665,14 @@ class TelegramBot:
                 await self.clear_user_data(user_id, context)
             
             elif callback_data == 'new_task':
-                # Новая задача
+                # Новая задача - НЕ УДАЛЯЕМ КЛАВИАТУРУ
                 user_data['state'] = 'idle'
                 await self.send_temporary_message(
                     context, user_id,
                     "📝 Введите описание новой задачи:"
                 )
+                # Обновляем клавиатуру для новой задачи
+                await self.update_main_keyboard(context, user_id)
             
             elif callback_data == 'back_to_main':
                 # Возврат к главной клавиатуре
@@ -739,7 +798,8 @@ class TelegramBot:
             'task_documents': {},
             'keyboard_message_id': None,
             'last_keyboard_text': None,
-            'last_keyboard_markup': None
+            'last_keyboard_markup': None,
+            'previous_messages': []
         }
         await self.send_temporary_message(
             context, user_id,
@@ -755,6 +815,9 @@ class TelegramBot:
         """Генерация и отправка кода"""
         user_id = update.effective_user.id if update.message else update.callback_query.from_user.id
         user_data = self.get_user_data(user_id)
+        
+        # Очищаем предыдущие сообщения, но сохраняем клавиатуру
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
         
         # Получаем информацию о пользователе для сохранения
         user = update.effective_user if update.message else update.callback_query.from_user
@@ -773,6 +836,7 @@ class TelegramBot:
             chat_id=user_id,
             text=f"🔄 Генерируем код для: {task['summary']}..."
         )
+        user_data['previous_messages'].append(message.message_id)
         
         try:
             # Генерация кода
@@ -797,6 +861,13 @@ class TelegramBot:
                     f.write(html_content)
                     temp_file_path = f.name
                 
+                # Удаляем сообщение о генерации
+                try:
+                    await context.bot.delete_message(chat_id=user_id, message_id=message.message_id)
+                    user_data['previous_messages'].remove(message.message_id)
+                except Exception as e:
+                    logger.debug(f"Не удалось удалить сообщение о генерации: {e}")
+                
                 # Отправляем файл
                 with open(temp_file_path, 'rb') as f:
                     doc_message = await context.bot.send_document(
@@ -807,9 +878,7 @@ class TelegramBot:
                 
                 # Сохраняем ID документа для задачи
                 user_data['task_documents'][task['id']] = doc_message.message_id
-                
-                # Удаляем сообщение о генерации
-                await context.bot.delete_message(chat_id=user_id, message_id=message.message_id)
+                user_data['previous_messages'].append(doc_message.message_id)
                 
                 # Обновляем клавиатуру управления
                 await self.update_main_keyboard(context, user_id, task)
@@ -835,9 +904,12 @@ class TelegramBot:
                 os.remove(temp_file_path)
     
     async def switch_to_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task: Dict):
-        """Переключение на существующую задачу"""
+        """Переключение на существующую задачу с повторной отправкой файла"""
         user_id = update.callback_query.from_user.id if update.callback_query else update.effective_user.id
         user_data = self.get_user_data(user_id)
+        
+        # Очищаем предыдущие сообщения, но сохраняем клавиатуру
+        await self.cleanup_previous_messages(context, user_id, keep_keyboard=True)
         
         # Логируем действие
         self.log_activity(user_id, "switch_task", task['id'], task.get('description', ''))
@@ -851,23 +923,41 @@ class TelegramBot:
         
         user_data['current_task'] = task
         
-        # Находим ID документа для задачи
-        doc_id = user_data['task_documents'].get(task['id'])
+        # Получаем сохраненный HTML контент
+        html_content = user_data['html_contents'][task['id']]
         
-        if doc_id:
-            # Отправляем сообщение с информацией о переключении
-            await self.send_temporary_message(
-                context, user_id,
-                text=f"✅ Переключились на: {task['summary']}"
-            )
+        # Создаем временный HTML файл для отправки
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+            f.write(html_content)
+            temp_file_path = f.name
+        
+        try:
+            # Отправляем файл заново
+            with open(temp_file_path, 'rb') as f:
+                doc_message = await context.bot.send_document(
+                    chat_id=user_id,
+                    document=InputFile(f, filename=f"task_{task['id']}_code.html"),
+                    caption=f"📂 Активная задача: {task['summary']}"
+                )
+            
+            # Сохраняем ID документа для задачи
+            user_data['task_documents'][task['id']] = doc_message.message_id
+            user_data['previous_messages'].append(doc_message.message_id)
             
             # Обновляем клавиатуру управления
             await self.update_main_keyboard(context, user_id, task)
-        else:
-            # Если документ не найден, перегенерируем код
-            await self.generate_and_send_code(update, context, task, regenerate=True)
-        
-        logger.info(f"Пользователь {user_id} переключился на задачу {task['id']}")
+            
+            logger.info(f"Пользователь {user_id} переключился на задачу {task['id']}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке файла: {e}")
+            await self.send_temporary_message(
+                context, user_id,
+                f"❌ Ошибка при отправке файла: {str(e)}"
+            )
+        finally:
+            # Удаляем временный файл
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 def run_bot(token: str):
     """Запуск Telegram бота"""
