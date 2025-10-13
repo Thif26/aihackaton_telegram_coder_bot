@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class AIClient:
     def __init__(self):
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = "deepseek/deepseek-chat-v3.1:free"
+        self.model = "tngtech/deepseek-r1t2-chimera:free"
         self.api_key = self._get_api_key()
     
     def _get_api_key(self):
